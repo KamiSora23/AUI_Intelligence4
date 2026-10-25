@@ -1,0 +1,15 @@
+.env
+.venv/
+.worktrees/
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+reportes_pdf/*.pdf
+base_datos/*.db
+base_datos/*.db-*
+.streamlit/secrets.toml
+modelos_entrenados/

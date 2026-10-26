@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import streamlit as st
 from sqlalchemy import text
@@ -106,11 +108,20 @@ def renderizar_vista_configuracion():
             ),
         )
 
-        umbral_alerta = st.slider(
-            "Puntaje mínimo para emitir una alerta",
-            min_value=0.50, max_value=0.95, value=alerta_def, step=0.05,
-            help="Puntaje a partir del cual se genera una alerta prioritaria de auditoría."
+        # Se muestra en puntos (0-100) y se guarda en escala 0-1, como antes.
+        puntos_notificacion = st.slider(
+            "Puntaje para notificación de riesgo crítico",
+            min_value=50, max_value=95,
+            value=int(round(alerta_def * 100 if alerta_def <= 1 else alerta_def)),
+            step=5,
+            help=(
+                "Casos desde este puntaje generan un aviso de riesgo crítico. No cambia "
+                "el nivel de riesgo ni la propuesta: el riesgo alto empieza siempre en "
+                "71 puntos. Hoy el aviso es simulado (se escribe en el registro del "
+                "servidor; no se envía correo)."
+            ),
         )
+        umbral_alerta = puntos_notificacion / 100.0
 
     st.divider()
 
@@ -128,8 +139,9 @@ def renderizar_vista_configuracion():
         width="stretch",
     )
     st.caption(
-        "Automático registra el dictamen; Semiautomático guarda una propuesta; "
-        "Manual mantiene el expediente pendiente."
+        "Automático y Semiautomático guardan una propuesta: confirmar desde 71 puntos, "
+        "revisar de 41 a 70 y descartar hasta 40. Manual deja todos los expedientes "
+        "pendientes. El dictamen final siempre lo registra un auditor."
     )
 
     st.divider()
@@ -188,14 +200,15 @@ def renderizar_vista_configuracion():
                     "Configuración",
                     (
                         f"Parámetros actualizados: proporción={contaminacion}, "
+                        f"similitud={umbral_nlp:.2f}, ventana={ventana_dias} días, "
                         f"UIT=S/ {monto_uit}, flujo={opcion_flujo}, "
-                        f"umbral={umbral_alerta * 100:.0f} puntos."
+                        f"notificación desde {puntos_notificacion} puntos."
                     ),
                 )
 
                 st.success(
                     f"Configuración guardada. Modo activo: {opcion_flujo}; "
-                    f"alertas desde {umbral_alerta * 100:.0f} puntos."
+                    f"notificaciones de riesgo crítico desde {puntos_notificacion} puntos."
                 )
             except Exception as e:
                 session.rollback()
@@ -205,8 +218,11 @@ def renderizar_vista_configuracion():
     else:
         st.warning("Tu rol no permite modificar los parámetros del sistema.")
 
-    st.divider()
-    _renderizar_aprendizaje_supervisado()
+    # El panel se muestra solo si se activa en el .env: mientras no haya datos
+    # suficientes el modelo permanece inactivo y no afecta a ningún puntaje.
+    if os.getenv("MOSTRAR_APRENDIZAJE_SUPERVISADO", "no").strip().lower() in ("si", "sí", "true", "1"):
+        st.divider()
+        _renderizar_aprendizaje_supervisado()
 
 
 def _renderizar_aprendizaje_supervisado() -> None:

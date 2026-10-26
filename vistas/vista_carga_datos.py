@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import unicodedata
 from typing import Any
 
@@ -83,10 +84,18 @@ def renderizar_vista_carga() -> None:
         st.warning("Tu rol no permite incorporar ni eliminar fuentes de datos.")
         return
 
+    # El conector OSCE se muestra solo si se activa en el .env.
+    opciones = [
+        opcion for opcion in OPCIONES_INGESTA
+        if opcion != "Conector OSCE" or os.getenv("MOSTRAR_CONECTOR_OSCE", "no").strip().lower()
+        in ("si", "sí", "true", "1")
+    ]
+    if st.session_state.get("modo_ingesta") not in (*opciones, None):
+        st.session_state.pop("modo_ingesta")
     modo = st.segmented_control(
         "Modo de ingesta",
-        OPCIONES_INGESTA,
-        default=OPCIONES_INGESTA[0],
+        opciones,
+        default=opciones[0],
         key="modo_ingesta",
         label_visibility="collapsed",
         width="stretch",

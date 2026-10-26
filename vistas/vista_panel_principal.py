@@ -96,6 +96,23 @@ def _preparar_paginas_dashboard(
     }
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _cargar_umbral_critico() -> float:
+    """Puntaje de riesgo crítico: el mismo que dispara la notificación (escala 0-100)."""
+    session = obtener_session()
+    try:
+        valor = session.execute(
+            text(
+                "SELECT umbral_alerta_notificacion FROM configuracion_sistema "
+                "ORDER BY id_config DESC LIMIT 1"
+            )
+        ).scalar()
+    finally:
+        session.close()
+    valor = float(valor) if valor is not None else 0.85
+    return valor * 100.0 if valor <= 1.0 else valor
+
+
 def _estado_revision_html(fila) -> str:
     """Etiqueta del estado de revisión con su aclaración debajo."""
     etiqueta, detalle = describir_estado_revision(
@@ -162,6 +179,9 @@ def renderizar_vista_dashboard():
     # Resumen operativo.
     total_reg = len(df_data)
     anomalias_cnt = int((df_data['puntaje_riesgo'] >= 71.0).sum())
+    # Prioridad dentro del riesgo alto; no cambia niveles ni propuestas.
+    umbral_critico = _cargar_umbral_critico()
+    criticos_cnt = int((df_data['puntaje_riesgo'] >= umbral_critico).sum())
     monto_sospechoso = df_data[df_data['puntaje_riesgo'] >= 71.0]['monto_referencial'].sum()
     risk_score_prom = df_data['puntaje_riesgo'].mean()
 
@@ -177,9 +197,9 @@ def renderizar_vista_dashboard():
 
     with col_k2:
         tarjeta_metrica(
-            "Alertas prioritarias",
+            "Casos de riesgo alto",
             f"{anomalias_cnt:,}",
-            "Casos con 71 puntos o más",
+            f"71 puntos o más · {criticos_cnt:,} de riesgo crítico ({umbral_critico:.0f} o más)",
             "shield",
             "danger",
         )
@@ -188,7 +208,7 @@ def renderizar_vista_dashboard():
         tarjeta_metrica(
             "Exposición observada",
             f"S/ {monto_sospechoso:,.2f}",
-            "Monto asociado a casos prioritarios",
+            "Monto de los casos de riesgo alto",
             "activity",
             "warning",
         )
@@ -209,7 +229,11 @@ def renderizar_vista_dashboard():
             entidades_unicas = ["Todas"] + list(df_data['entidad_nombre'].unique())
             entidad_sel = st.selectbox("Entidad", entidades_unicas)
         with col_f2:
-            nivel_riesgo_sel = st.selectbox("Nivel de riesgo", ["Todos", "Alto (71–100)", "Medio (41–70)", "Bajo (0–40)"])
+            opcion_critico = f"Crítico ({umbral_critico:.0f}–100)"
+            nivel_riesgo_sel = st.selectbox(
+                "Nivel de riesgo",
+                ["Todos", opcion_critico, "Alto (71–100)", "Medio (41–70)", "Bajo (0–40)"],
+            )
         with col_f3:
             estado_rev_sel = st.selectbox(
                 "Estado de revisión",
@@ -223,7 +247,9 @@ def renderizar_vista_dashboard():
     df_filtrado = df_data.copy()
     if entidad_sel != "Todas":
         df_filtrado = df_filtrado[df_filtrado['entidad_nombre'] == entidad_sel]
-    if nivel_riesgo_sel == "Alto (71–100)":
+    if nivel_riesgo_sel == opcion_critico:
+        df_filtrado = df_filtrado[df_filtrado['puntaje_riesgo'] >= umbral_critico]
+    elif nivel_riesgo_sel == "Alto (71–100)":
         df_filtrado = df_filtrado[df_filtrado['puntaje_riesgo'] >= 71.0]
     elif nivel_riesgo_sel == "Medio (41–70)":
         df_filtrado = df_filtrado[(df_filtrado['puntaje_riesgo'] >= 41.0) & (df_filtrado['puntaje_riesgo'] < 71.0)]
@@ -382,6 +408,10 @@ def renderizar_vista_dashboard():
         riesgo = (
             f"{estado_html(nivel, tono)}"
             f"<span class='table-cell__meta'>{puntaje:.1f} puntos</span>"
+            + (
+                f"<span class='table-cell__meta'><b>Riesgo crítico</b></span>"
+                if puntaje >= umbral_critico else ""
+            )
         )
         filas_resultados.append(
             [
@@ -469,7 +499,11 @@ def renderizar_vista_dashboard():
                             '<div class="case-card__risk">'
                             f"{estado_html(nivel_mostrado, tono)}"
                             f"<span>{float(row['puntaje_riesgo']):.1f} puntos</span>"
-                            f"<small>RUC {texto_seguro(row['entidad_ruc'])}</small>"
+                            + (
+                                "<small><b>Riesgo crítico</b></small>"
+                                if row["puntaje_riesgo"] >= umbral_critico else ""
+                            )
+                            + f"<small>RUC {texto_seguro(row['entidad_ruc'])}</small>"
                             "</div>"
                             '<div class="case-card__risk">'
                             f"{_estado_revision_html(row)}"
